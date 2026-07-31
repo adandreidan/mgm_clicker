@@ -4,6 +4,7 @@ bot-detection logic. Ctrl+C shuts down gracefully; moving the mouse to a
 screen corner triggers pyautogui's FAILSAFE and aborts immediately.
 """
 
+import argparse
 import csv
 import os
 import random
@@ -49,15 +50,27 @@ class CsvLogger:
         self._file.close()
 
 
+def parse_args():
+    parser = argparse.ArgumentParser(description=__doc__)
+    parser.add_argument(
+        "--minutes", type=float, default=None,
+        help="Override config.SESSION_HOURS for a short smoke test, e.g. --minutes 2",
+    )
+    return parser.parse_args()
+
+
 def main():
+    args = parse_args()
+    session_hours = args.minutes / 60 if args.minutes is not None else config.SESSION_HOURS
+
     os.makedirs(config.LOG_DIR, exist_ok=True)
     log_path = os.path.join(config.LOG_DIR, f"session_{datetime.now():%Y%m%d_%H%M%S}.csv")
     logger = CsvLogger(log_path)
     print(f"Logging to {log_path}")
-    print(f"Session length: {config.SESSION_HOURS}h, SPEED={config.SPEED}. Ctrl+C to stop early.")
+    print(f"Session length: {session_hours}h, SPEED={config.SPEED}. Ctrl+C to stop early.")
 
     humanizer = Humanizer()
-    deadline = time.monotonic() + config.SESSION_HOURS * 3600
+    deadline = time.monotonic() + session_hours * 3600
     rounds = 0
 
     try:

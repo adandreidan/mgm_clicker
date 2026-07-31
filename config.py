@@ -5,17 +5,32 @@ here so the rest of the code never hardcodes a number.
 """
 
 # --- Screen coordinates ------------------------------------------------------
-# Update these to match your game window. Find them with:
-#   python3 -c "import pyautogui, time; time.sleep(3); print(pyautogui.position())"
-# hover the mouse over each button center during the 3s pause.
+# Update these to match your game window. Run `python3 find_coords.py` and
+# hover over each button to read off its x,y.
 #
-# width/height are the clickable button's on-screen size in pixels; the
-# humanizer uses them to keep simulated click points inside the button.
+# These are ABSOLUTE SCREEN PIXELS, not page/DOM coordinates, so they go
+# stale if anything about the window changes: browser window moved or
+# resized, page zoom level changed, fullscreen vs windowed toggled, a
+# responsive layout reflowing the buttons, or the OS display-scaling
+# setting changing. Fix the browser window's size, position, and zoom
+# for the whole session BEFORE running find_coords.py, and don't touch
+# them again until the soak test finishes -- a resize mid-session will
+# silently make every subsequent click land in the wrong place.
+#
+# radius is the clickable button's on-screen radius in pixels (buttons are
+# circular). Measure it by hovering find_coords.py's cursor over the
+# center, then over the visible edge, and taking the pixel distance.
 BUTTONS = {
-    "rock":     {"center": (600, 700), "width": 120, "height": 120},
-    "paper":    {"center": (760, 700), "width": 120, "height": 120},
-    "scissors": {"center": (920, 700), "width": 120, "height": 120},
+    "rock":     {"center": (859, 289), "radius": 60},
+    "paper":    {"center": (766, 432), "radius": 60},
+    "scissors": {"center": (955, 427), "radius": 60},
 }
+
+# Screen bounds, top-left to bottom-right. Used to keep idle drift (and
+# anything else that nudges the cursor around) from wandering toward a
+# physical screen corner, which would trip pyautogui's FAILSAFE.
+SCREEN_MIN = (0, 0)
+SCREEN_MAX = (1727, 1116)
 
 # --- Speed --------------------------------------------------------------------
 # humancursor's SystemCursor.move_to samples a travel duration of
@@ -25,25 +40,33 @@ BUTTONS = {
 # here). So SPEED just divides the sampled duration -> mean travel time
 # drops but the relative spread (min/max ratio) and the curve shape are
 # untouched. SPEED=1.0 reproduces stock humancursor timing.
-SPEED = 3.0
+SPEED = 8.0
 
 # --- Session ------------------------------------------------------------------
 SESSION_HOURS = 5.0
 
-# --- Inter-click delay (lognormal, not uniform) --------------------------------
-# Human reaction/decision time is right-skewed: most rounds click quickly,
-# with an occasional long tail (hesitation, distraction). A flat uniform
-# histogram is trivially distinguishable from real timing data.
-#   median delay = exp(DELAY_MU)
-DELAY_MU = -0.6        # ln-space mean -> median ~= 0.55s
-DELAY_SIGMA = 0.5      # ln-space stdev -> controls the right-skew/tail weight
-DELAY_MIN = 0.15       # hard floor, seconds
-DELAY_MAX = 8.0        # hard cap, seconds (clip the extreme tail)
+# --- Inter-click delay (hard cooldown + lognormal human jitter) ----------------
+# The game itself needs ANIMATION_COOLDOWN_SECONDS after a click before it
+# will register the next one -- this is a functional requirement, not a
+# behavioral tuning knob. Clicking sooner risks a missed/desynced round.
+#
+# On top of that guaranteed floor, human reaction/decision time is
+# right-skewed (most rounds react quickly once the animation clears, with
+# an occasional longer pause), so the *jitter* added above the cooldown is
+# drawn from a lognormal, not random.uniform -- a flat histogram is the
+# easiest thing in the world to detect. Total delay = cooldown + jitter,
+# so it can never fall below the cooldown (no clipping artifacts, since
+# lognormal draws are always >= 0).
+ANIMATION_COOLDOWN_SECONDS = 5.0
+DELAY_JITTER_MU = -1.2      # ln-space mean -> median jitter ~= 0.30s
+DELAY_JITTER_SIGMA = 0.6    # ln-space stdev -> controls the right-skew/tail
+DELAY_MAX = 20.0            # hard cap on cooldown + jitter combined, seconds
 
 # --- Fatigue --------------------------------------------------------------------
 # Delays drift longer as the session goes on: a linear ramp on session
-# progress, applied as a multiplier on top of the lognormal draw, plus a
-# little noise so the ramp itself isn't a perfectly straight line.
+# progress, applied as a multiplier on top of the jitter draw (not the
+# fixed animation cooldown -- that stays constant), plus a little noise
+# so the ramp itself isn't a perfectly straight line.
 FATIGUE_MAX_MULTIPLIER = 1.8   # multiplier reached at the end of the session
 FATIGUE_JITTER = 0.15          # stdev of gaussian noise added to the multiplier
 
@@ -64,17 +87,38 @@ MISCLICK_PROB = 0.02        # click the wrong button, then recover
 DOUBLE_CLICK_PROB = 0.03    # accidental double-click on the intended button
 
 # --- Click landing point -------------------------------------------------------------
-# Fraction of the button's half-width/half-height used as the gaussian
-# stdev for where inside the button the click actually lands (weighted
-# toward center, resampled if it falls outside the button).
-CLICK_SPREAD_FRACTION = 0.28
+# Landing point is sampled anywhere inside the button's circle: angle is
+# uniform, radial distance is radius * random()**CLICK_CENTER_BIAS.
+#   exponent 0.5  -> uniform-by-area (fills the whole circle evenly)
+#   exponent 1.0  -> linear falloff, noticeably weighted toward center
+#   exponent >1.5 -> tight cluster near center
+# Lower this for a large button where you want clicks spread across more
+# of its area; raise it for a small button where you want to stay safely
+# away from the edge.
+CLICK_CENTER_BIAS = 0.7
+
+# Cap the sampled radius at this fraction of the true button radius, so a
+# click never lands right on (or past) the edge of the hit area. Kept
+# fairly conservative (rather than e.g. 0.9) because the measured radius
+# above is itself an approximation -- this leaves margin for that error.
+CLICK_MAX_RADIUS_FRACTION = 0.75
+
+# When a round repeats the same button as the previous round, this is the
+# chance the cursor just stays where it is (small in-place jitter, no
+# deliberate travel) instead of re-traveling to a fresh point -- a real
+# player often rests the cursor on a button they keep re-picking. The
+# remaining (1 - this) fraction of repeats still travels normally, so
+# staying put isn't the only thing that happens on a repeat either.
+SAME_BUTTON_STAY_PROB = 0.55
+STAY_JITTER_PX = 6   # max in-place pixel jitter when staying put
 
 # --- Choice distribution & streaks -----------------------------------------------------
-# Not uniform 33/33/33: a mild bias plus a chance to "stick" with the
-# previous choice for a few rounds (streaky, like real players).
-CHOICE_BASE_WEIGHTS = {"rock": 0.38, "paper": 0.31, "scissors": 0.31}
-STREAK_CONTINUE_PROB = 0.18   # chance to repeat the previous choice
-STREAK_MAX_LEN = 4            # cap on consecutive repeats before forcing a reroll
+# Not uniform 33/33/33: biased toward paper, plus a strong chance to
+# "stick" with the previous choice for several rounds before rerolling
+# (streaky, like a real player who keeps repeating a pick).
+CHOICE_BASE_WEIGHTS = {"rock": 0.25, "paper": 0.50, "scissors": 0.25}
+STREAK_CONTINUE_PROB = 0.875  # chance to repeat the previous choice
+STREAK_MAX_LEN = 16           # cap on consecutive repeats before forcing a reroll
 
 # --- Logging -----------------------------------------------------------------------------
 LOG_DIR = "logs"

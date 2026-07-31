@@ -8,6 +8,7 @@ non-uniform choice distribution. That's all handled here; HumanCursor is
 only ever asked to move the cursor.
 """
 
+import math
 import random
 import time
 
@@ -23,6 +24,7 @@ class Humanizer:
         self._session_start = time.monotonic()
         self._last_choice = None
         self._streak_len = 0
+        self._last_clicked = None
 
     # ---------------------------------------------------------------- timing
     def _session_fraction_elapsed(self):
@@ -35,10 +37,13 @@ class Humanizer:
         return max(0.5, base + random.gauss(0, config.FATIGUE_JITTER))
 
     def sample_delay(self):
-        """Inter-click delay: lognormal draw, right-skewed, scaled by fatigue."""
-        raw = random.lognormvariate(config.DELAY_MU, config.DELAY_SIGMA)
-        delay = raw * self._fatigue_multiplier()
-        return min(max(delay, config.DELAY_MIN), config.DELAY_MAX)
+        """Inter-click delay: a fixed game-animation cooldown, plus a
+        right-skewed lognormal jitter (scaled by fatigue) on top. The
+        cooldown is a hard floor by construction -- jitter is always >= 0,
+        so there's no clipping artifact piling draws up at a boundary."""
+        jitter = random.lognormvariate(config.DELAY_JITTER_MU, config.DELAY_JITTER_SIGMA)
+        delay = config.ANIMATION_COOLDOWN_SECONDS + jitter * self._fatigue_multiplier()
+        return min(delay, config.DELAY_MAX)
 
     @staticmethod
     def _scaled_move_duration():
@@ -59,7 +64,10 @@ class Humanizer:
         x, y = pyautogui.position()
         dx = random.randint(-config.IDLE_DRIFT_RADIUS, config.IDLE_DRIFT_RADIUS)
         dy = random.randint(-config.IDLE_DRIFT_RADIUS, config.IDLE_DRIFT_RADIUS)
-        target = (max(0, x + dx), max(0, y + dy))
+        target = (
+            min(max(x + dx, config.SCREEN_MIN[0]), config.SCREEN_MAX[0]),
+            min(max(y + dy, config.SCREEN_MIN[1]), config.SCREEN_MAX[1]),
+        )
         self.move_to(target)
         return target
 
@@ -73,17 +81,30 @@ class Humanizer:
 
     # --------------------------------------------------------- click target
     def _landing_point(self, button_name):
-        """Point within a button's box, gaussian-weighted toward center."""
+        """Point within a button's circle: uniform angle, radius drawn from
+        random()**CLICK_CENTER_BIAS so it's weighted toward center but still
+        covers the whole button (see config.CLICK_CENTER_BIAS)."""
         b = config.BUTTONS[button_name]
         cx, cy = b["center"]
-        half_w, half_h = b["width"] / 2, b["height"] / 2
-        stdev_x = half_w * config.CLICK_SPREAD_FRACTION
-        stdev_y = half_h * config.CLICK_SPREAD_FRACTION
-        while True:
-            x = random.gauss(cx, stdev_x)
-            y = random.gauss(cy, stdev_y)
-            if abs(x - cx) <= half_w and abs(y - cy) <= half_h:
-                return (int(x), int(y))
+        max_r = b["radius"] * config.CLICK_MAX_RADIUS_FRACTION
+        angle = random.uniform(0, 2 * math.pi)
+        r = max_r * (random.random() ** config.CLICK_CENTER_BIAS)
+        x = cx + r * math.cos(angle)
+        y = cy + r * math.sin(angle)
+        return (int(x), int(y))
+
+    def _clamp_to_button(self, point, button_name):
+        """Pull a point back inside the button's allowed click radius if a
+        jitter step pushed it out."""
+        b = config.BUTTONS[button_name]
+        cx, cy = b["center"]
+        max_r = b["radius"] * config.CLICK_MAX_RADIUS_FRACTION
+        dx, dy = point[0] - cx, point[1] - cy
+        dist = math.hypot(dx, dy)
+        if dist <= max_r or dist == 0:
+            return point
+        scale = max_r / dist
+        return (int(cx + dx * scale), int(cy + dy * scale))
 
     # -------------------------------------------------------------- choice
     def choose(self):
@@ -106,21 +127,41 @@ class Humanizer:
     def click_button(self, button_name):
         """Move to and click a button, occasionally with a human slip
         (overshoot+correction, misclick+recovery, double-click).
+
+        When this round repeats the same button as last time, sometimes
+        stays put -- a small in-place jitter with no deliberate travel,
+        like a real player resting the cursor on a button they keep
+        picking -- rather than always re-traveling across it. The rest of
+        the time it still travels to a freshly sampled point even though
+        it's the same icon, so staying put isn't the only outcome either.
+
         Returns a list of event dicts for logging."""
         events = []
-        target = self._landing_point(button_name)
+        same_as_last = button_name == self._last_clicked
+        stay_put = same_as_last and random.random() < config.SAME_BUTTON_STAY_PROB
 
-        if random.random() < config.OVERSHOOT_PROB:
-            overshoot = (
-                target[0] + random.randint(-config.OVERSHOOT_MAX_PX, config.OVERSHOOT_MAX_PX),
-                target[1] + random.randint(-config.OVERSHOOT_MAX_PX, config.OVERSHOOT_MAX_PX),
+        if stay_put:
+            cur_x, cur_y = pyautogui.position()
+            jittered = (
+                cur_x + random.randint(-config.STAY_JITTER_PX, config.STAY_JITTER_PX),
+                cur_y + random.randint(-config.STAY_JITTER_PX, config.STAY_JITTER_PX),
             )
-            self.move_to(overshoot)
-            events.append({"event": "overshoot", "x": overshoot[0], "y": overshoot[1]})
-            self.move_to(target)
-            events.append({"event": "correction", "x": target[0], "y": target[1]})
+            target = self._clamp_to_button(jittered, button_name)
+            pyautogui.moveTo(target[0], target[1])
+            events.append({"event": "stay_adjust", "x": target[0], "y": target[1]})
         else:
-            self.move_to(target)
+            target = self._landing_point(button_name)
+            if random.random() < config.OVERSHOOT_PROB:
+                overshoot = (
+                    target[0] + random.randint(-config.OVERSHOOT_MAX_PX, config.OVERSHOOT_MAX_PX),
+                    target[1] + random.randint(-config.OVERSHOOT_MAX_PX, config.OVERSHOOT_MAX_PX),
+                )
+                self.move_to(overshoot)
+                events.append({"event": "overshoot", "x": overshoot[0], "y": overshoot[1]})
+                self.move_to(target)
+                events.append({"event": "correction", "x": target[0], "y": target[1]})
+            else:
+                self.move_to(target)
 
         if random.random() < config.MISCLICK_PROB:
             wrong_name = random.choice([b for b in config.BUTTONS if b != button_name])
@@ -144,4 +185,5 @@ class Humanizer:
                 "x": target[0], "y": target[1],
             })
 
+        self._last_clicked = button_name
         return events
