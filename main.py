@@ -49,6 +49,12 @@ class CsvLogger:
     def close(self):
         self._file.close()
 
+    def __enter__(self):
+        return self
+
+    def __exit__(self, exc_type, exc, tb):
+        self.close()
+
 
 def parse_args():
     parser = argparse.ArgumentParser(description=__doc__)
@@ -68,10 +74,14 @@ def main():
 
     os.makedirs(config.LOG_DIR, exist_ok=True)
     log_path = os.path.join(config.LOG_DIR, f"session_{datetime.now():%Y%m%d_%H%M%S}.csv")
-    logger = CsvLogger(log_path)
-    print(f"Logging to {log_path}")
-    print(f"Session length: {session_hours}h, SPEED={config.SPEED}. Ctrl+C to stop early.")
+    with CsvLogger(log_path) as logger:
+        print(f"Logging to {log_path}")
+        print(f"Session length: {session_hours}h, SPEED={config.SPEED}. Ctrl+C to stop early.")
+        rounds = _run(logger, session_hours)
+    print(f"Done. {rounds} rounds played. Log: {log_path}")
 
+
+def _run(logger, session_hours):
     humanizer = Humanizer(session_hours)
     deadline = time.monotonic() + session_hours * 3600
     rounds = 0
@@ -109,8 +119,7 @@ def main():
         logger.log("force_stop")
     finally:
         logger.log("session_end")
-        logger.close()
-        print(f"Done. {rounds} rounds played. Log: {log_path}")
+    return rounds
 
 
 if __name__ == "__main__":
