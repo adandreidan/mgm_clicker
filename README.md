@@ -18,6 +18,7 @@ for replay against detection logic.
 | `config.py` | ALL tunables. Read this first, edit this to port to a new machine. |
 | `humanizer.py` | `Humanizer` class — timing, movement, choice logic, imperfections. Wraps `humancursor.SystemCursor`; never calls `SystemCursor.click_on` (see Gotchas). |
 | `main.py` | Run loop, CSV logger, Ctrl+C handling. CLI flag `--minutes N` overrides `config.SESSION_HOURS` for short tests without editing config. |
+| `check_click.py` | Standalone: clicks one configured button's center once, to confirm the game registers scripted clicks (step 6). |
 | `find_coords.py` | Standalone: prints live cursor position at 10Hz. Used to measure button coords/radius by hovering, no click required. |
 | `logs/session_<timestamp>.csv` | Output. Schema below. |
 
@@ -70,9 +71,8 @@ device-specific state; everything else is optional tuning.
    polar/circular sampling) — this is the one piece of logic, not just
    config, that's shape-specific.
 
-6. **Verify click registration** before trusting anything: single
-   scripted click via `SystemCursor().move_to(...)` + `pyautogui.click(...)`
-   at one button's center, then confirm visually (or via screenshot) that
+6. **Verify click registration** before trusting anything: run
+   `python3 check_click.py <rock|paper|scissors>` to click one button's center, then confirm visually (or via screenshot) that
    the game reacted. Do this per button if measurements are uncertain.
 
 7. **Set the game's click cooldown**: `config.ANIMATION_COOLDOWN_SECONDS`
