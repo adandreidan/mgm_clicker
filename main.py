@@ -69,7 +69,7 @@ def main():
     print(f"Logging to {log_path}")
     print(f"Session length: {session_hours}h, SPEED={config.SPEED}. Ctrl+C to stop early.")
 
-    humanizer = Humanizer()
+    humanizer = Humanizer(session_hours)
     deadline = time.monotonic() + session_hours * 3600
     rounds = 0
 

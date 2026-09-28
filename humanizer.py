@@ -19,8 +19,9 @@ import config
 
 
 class Humanizer:
-    def __init__(self):
+    def __init__(self, session_hours=None):
         self.cursor = SystemCursor()
+        self._session_hours = session_hours if session_hours is not None else config.SESSION_HOURS
         self._session_start = time.monotonic()
         self._last_choice = None
         self._streak_len = 0
@@ -29,7 +30,7 @@ class Humanizer:
     # ---------------------------------------------------------------- timing
     def _session_fraction_elapsed(self):
         elapsed = time.monotonic() - self._session_start
-        return min(elapsed / (config.SESSION_HOURS * 3600), 1.0)
+        return min(elapsed / (self._session_hours * 3600), 1.0)
 
     def _fatigue_multiplier(self):
         frac = self._session_fraction_elapsed()
