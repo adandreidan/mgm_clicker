@@ -56,7 +56,10 @@ def parse_args():
         "--minutes", type=float, default=None,
         help="Override config.SESSION_HOURS for a short smoke test, e.g. --minutes 2",
     )
-    return parser.parse_args()
+    args = parser.parse_args()
+    if args.minutes is not None and args.minutes <= 0:
+        parser.error("--minutes must be greater than 0")
+    return args
 
 
 def main():
