@@ -26,7 +26,7 @@ for replay against detection logic.
 Run in this order. Do not skip steps 3/5/7 — they're the actual
 device-specific state; everything else is optional tuning.
 
-1. **Deps**: `pip3 install pyautogui humancursor numpy pytweening selenium pillow`.
+1. **Deps**: `pip3 install -r requirements.txt`.
    Pillow is required by `pyscreeze` (pyautogui's screenshot backend) but is
    not reliably auto-installed as its dependency on newer Python — on a
    fresh Python 3.14 install here, `pyautogui.screenshot()` raised
