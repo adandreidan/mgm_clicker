@@ -122,3 +122,26 @@ STREAK_MAX_LEN = 16           # cap on consecutive repeats before forcing a rero
 
 # --- Logging -----------------------------------------------------------------------------
 LOG_DIR = "logs"
+
+
+def validate():
+    """Sanity-check the values above; raises ValueError on the first problem.
+    Called once at startup so a typo fails fast instead of hours into a run."""
+    if abs(sum(CHOICE_BASE_WEIGHTS.values()) - 1.0) > 1e-6:
+        raise ValueError("CHOICE_BASE_WEIGHTS must sum to 1")
+    if set(CHOICE_BASE_WEIGHTS) != set(BUTTONS):
+        raise ValueError("CHOICE_BASE_WEIGHTS and BUTTONS must have the same keys")
+    if not 0 < CLICK_MAX_RADIUS_FRACTION <= 1:
+        raise ValueError("CLICK_MAX_RADIUS_FRACTION must be in (0, 1]")
+    if BREAK_MIN_SECONDS > BREAK_MAX_SECONDS:
+        raise ValueError("BREAK_MIN_SECONDS must not exceed BREAK_MAX_SECONDS")
+    if DELAY_MAX < ANIMATION_COOLDOWN_SECONDS:
+        raise ValueError("DELAY_MAX must be at least ANIMATION_COOLDOWN_SECONDS")
+    if SPEED <= 0 or SESSION_HOURS <= 0:
+        raise ValueError("SPEED and SESSION_HOURS must be positive")
+    for name, b in BUTTONS.items():
+        x, y = b["center"]
+        if not (SCREEN_MIN[0] <= x <= SCREEN_MAX[0] and SCREEN_MIN[1] <= y <= SCREEN_MAX[1]):
+            raise ValueError(f"BUTTONS[{name!r}] center is outside SCREEN_MIN/SCREEN_MAX")
+        if b["radius"] <= 0:
+            raise ValueError(f"BUTTONS[{name!r}] radius must be positive")
