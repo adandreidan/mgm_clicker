@@ -6,6 +6,7 @@ screen corner triggers pyautogui's FAILSAFE and aborts immediately.
 
 import argparse
 import csv
+from collections import Counter
 import os
 import random
 import signal
@@ -78,14 +79,16 @@ def main():
     with CsvLogger(log_path) as logger:
         print(f"Logging to {log_path}")
         print(f"Session length: {session_hours}h, SPEED={config.SPEED}. Ctrl+C to stop early.")
-        rounds = _run(logger, session_hours)
-    print(f"Done. {rounds} rounds played. Log: {log_path}")
+        clicks = _run(logger, session_hours)
+    rounds = sum(clicks.values())
+    breakdown = ", ".join(f"{name}={clicks[name]}" for name in config.BUTTONS)
+    print(f"Done. {rounds} rounds played ({breakdown}). Log: {log_path}")
 
 
 def _run(logger, session_hours):
     humanizer = Humanizer(session_hours)
     deadline = time.monotonic() + session_hours * 3600
-    rounds = 0
+    clicks = Counter()
 
     try:
         while not _shutdown_requested and time.monotonic() < deadline:
@@ -106,7 +109,7 @@ def _run(logger, session_hours):
                     x=ev.get("x", ""),
                     y=ev.get("y", ""),
                 )
-            rounds += 1
+            clicks[choice] += 1
 
             delay = humanizer.sample_delay()
             logger.log("delay", choice=choice, delay_s=round(delay, 3))
@@ -120,7 +123,7 @@ def _run(logger, session_hours):
         logger.log("force_stop")
     finally:
         logger.log("session_end")
-    return rounds
+    return clicks
 
 
 if __name__ == "__main__":
