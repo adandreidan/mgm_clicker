@@ -70,6 +70,7 @@ def parse_args():
 
 def main():
     args = parse_args()
+    config.validate()
     session_hours = args.minutes / 60 if args.minutes is not None else config.SESSION_HOURS
 
     os.makedirs(config.LOG_DIR, exist_ok=True)
