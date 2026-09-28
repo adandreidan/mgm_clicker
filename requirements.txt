@@ -1,0 +1,6 @@
+pyautogui
+humancursor
+numpy
+pytweening
+selenium
+pillow
